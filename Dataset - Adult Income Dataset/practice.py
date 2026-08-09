@@ -1,3 +1,4 @@
+import xgboost as xgb
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -121,7 +122,13 @@ cv_res_df['rf_results'] = [rf_cv_results['test_accuracy'].mean().round(2), rf_cv
 print('*BASELINE CLF CV RESULTS:\n', cv_res_df, end='\n\n')
 
 # 3.)
-print('Best Performing Classifier:', rf_clf, end='\n\n')
+xgb_clf = xgb.XGBClassifier(random_state=42, n_jobs=4)
+xgb_cv_results = cross_validate(estimator=xgb_clf, X=X_train, y=y_train, scoring=['accuracy', 'precision', 'recall', 'f1', 'roc_auc'], cv=skfold, n_jobs=4)
+cv_res_df['xgb_results'] = [xgb_cv_results['test_accuracy'].mean().round(2), xgb_cv_results['test_precision'].mean().round(2), xgb_cv_results['test_recall'].mean().round(2), xgb_cv_results['test_f1'].mean().round(2), xgb_cv_results['test_roc_auc'].mean().round(2)]
+print('*BASELINE CLF CV RESULTS:\n', cv_res_df, end='\n\n')
+
+# 4.)
+print('Best Performing Classifier:', xgb_clf, end='\n\n')
 
 #============================================#
 
@@ -146,8 +153,8 @@ df_mod[target] = df_mod.pop(target)
 X_train = pd.concat([X_train, df_mod.loc[X_train.index, ag_encoded.columns], df_mod.loc[X_train.index, 'capital_gain_ratio']], axis=1)
 X_test = pd.concat([X_test, df_mod.loc[X_test.index, ag_encoded.columns], df_mod.loc[X_test.index, 'capital_gain_ratio']], axis=1)
 
-rf_clf.fit(X_train, y_train)
-topf_df = pd.DataFrame({'features': df_mod.columns[:-1], 'feature_score':rf_clf.feature_importances_})
+xgb_clf.fit(X_train, y_train)
+topf_df = pd.DataFrame({'features': df_mod.columns[:-1], 'feature_score':xgb_clf.feature_importances_})
 topf_df.sort_values(by='feature_score', ascending=False, inplace=True)
 topf_df.drop(index=topf_df.index[10:], inplace=True)
 topf_df.index = range(1, 11)
@@ -156,8 +163,11 @@ print(topf_df, end='\n\n')
 
 log_cv_results = cross_validate(estimator=logreg, X=X_train[topf_df['features'].to_list()], y=y_train, scoring=['accuracy', 'precision', 'recall', 'f1', 'roc_auc'], cv=skfold, n_jobs=4)
 rf_cv_results = cross_validate(estimator=rf_clf, X=X_train[topf_df['features'].to_list()], y=y_train, scoring=['accuracy', 'precision', 'recall', 'f1', 'roc_auc'], cv=skfold, n_jobs=4)
+xgb_cv_results = cross_validate(estimator=xgb_clf, X=X_train[topf_df['features'].to_list()], y=y_train, scoring=['accuracy', 'precision', 'recall', 'f1', 'roc_auc'], cv=skfold, n_jobs=4)
 cv_res_df = pd.DataFrame({'log_results':[log_cv_results['test_accuracy'].mean().round(2), log_cv_results['test_precision'].mean().round(2), log_cv_results['test_recall'].mean().round(2), log_cv_results['test_f1'].mean().round(2), log_cv_results['test_roc_auc'].mean().round(2)], 
-    'rf_results':[rf_cv_results['test_accuracy'].mean().round(2), rf_cv_results['test_precision'].mean().round(2), rf_cv_results['test_recall'].mean().round(2), rf_cv_results['test_f1'].mean().round(2), rf_cv_results['test_roc_auc'].mean().round(2)]}, index=['accuracy', 'precision', 'recall', 'f1', 'roc_auc'])
+    'rf_results':[rf_cv_results['test_accuracy'].mean().round(2), rf_cv_results['test_precision'].mean().round(2), rf_cv_results['test_recall'].mean().round(2), rf_cv_results['test_f1'].mean().round(2), rf_cv_results['test_roc_auc'].mean().round(2)],
+    'xgb_results':[xgb_cv_results['test_accuracy'].mean().round(2), xgb_cv_results['test_precision'].mean().round(2), xgb_cv_results['test_recall'].mean().round(2), xgb_cv_results['test_f1'].mean().round(2), xgb_cv_results['test_roc_auc'].mean().round(2)]},
+    index=['accuracy', 'precision', 'recall', 'f1', 'roc_auc'])
 
 print('*NEW CLF CV RESULTS:\n', cv_res_df, end='\n\n')
 
@@ -165,28 +175,28 @@ print('*NEW CLF CV RESULTS:\n', cv_res_df, end='\n\n')
 
 # PART 5 - HYPERPARAMETER
 # 1.)
-params = {'n_estimators':[100, 200, 300, 400, 500], 'max_depth':[5, 10, 20, 30], 'min_samples_split':[5, 10, 20, 30]}
-rsearch_cv = RandomizedSearchCV(estimator=rf_clf, param_distributions=params, n_iter=15, scoring='roc_auc', n_jobs=4, cv=skfold)
+params = {'n_estimators':[100, 200, 300, 400, 500], 'learning_rate':[0.01, 0.05, 0.1, 0.2],'max_depth':[3, 4, 5, 6, 7, 8], 'subsample':[0.7, 0.8, 0.9, 1], 'colsample_bytree':[0.7, 0.8, 0.9, 1], 'scale_pos_weight':[1, 2, 3]}
+rsearch_cv = RandomizedSearchCV(estimator=xgb_clf, param_distributions=params, n_iter=15, scoring='roc_auc', n_jobs=4, cv=skfold)
 rsearch_cv.fit(X_train, y_train)
 
 # 2.)
-print('*Best Hyperparameters for RandomForestClassifier:\n', rsearch_cv.best_params_, end='\n\n')
+print('*Best Hyperparameters for XGBClassifier:\n', rsearch_cv.best_params_, end='\n\n')
 print('*ROC_AUC CV SCORE: ', rsearch_cv.best_score_, end='\n\n')
 
 # 3.)
-tuned_rf_clf = RandomForestClassifier(random_state=42, n_jobs=4)
-tuned_rf_clf.set_params(**rsearch_cv.best_params_)
-tuned_rf_clf.fit(X_train, y_train)
+tuned_xgb_clf = xgb.XGBClassifier(random_state=42, n_jobs=4)
+tuned_xgb_clf.set_params(**rsearch_cv.best_params_)
+tuned_xgb_clf.fit(X_train, y_train)
 
 #============================================#
 
 # PART 6: FINAL EVALUATION ON TEST SET
 # 1.)
-final_acc = accuracy_score(y_true=y_test, y_pred=tuned_rf_clf.predict(X_test))
-final_prec = precision_score(y_true=y_test, y_pred=tuned_rf_clf.predict(X_test))
-final_rec = recall_score(y_true=y_test, y_pred=tuned_rf_clf.predict(X_test))
-final_f1 = f1_score(y_true=y_test, y_pred=tuned_rf_clf.predict(X_test))
-final_roc_auc = roc_auc_score(y_true=y_test, y_score=tuned_rf_clf.predict_proba(X_test)[:, 1])
+final_acc = accuracy_score(y_true=y_test, y_pred=tuned_xgb_clf.predict(X_test))
+final_prec = precision_score(y_true=y_test, y_pred=tuned_xgb_clf.predict(X_test))
+final_rec = recall_score(y_true=y_test, y_pred=tuned_xgb_clf.predict(X_test))
+final_f1 = f1_score(y_true=y_test, y_pred=tuned_xgb_clf.predict(X_test))
+final_roc_auc = roc_auc_score(y_true=y_test, y_score=tuned_xgb_clf.predict_proba(X_test)[:, 1])
 
 print('*FINAL SCORES:')
 print('Accuracy: ', final_acc,
@@ -195,14 +205,14 @@ print('Accuracy: ', final_acc,
     '\nF1: ', final_f1,
     '\nROC_AUC: ', final_roc_auc, end='\n\n')
 
-sns.heatmap(confusion_matrix(y_true=y_test, y_pred=tuned_rf_clf.predict(X_test)), cmap='coolwarm', annot=[['TN', 'FN'],['FP', 'TP']], fmt='')
+sns.heatmap(confusion_matrix(y_true=y_test, y_pred=tuned_xgb_clf.predict(X_test)), cmap='coolwarm', annot=[['TN', 'FN'],['FP', 'TP']], fmt='')
 plt.title('Final Confusion Matrix', weight='bold')
 plt.xticks([])
 plt.yticks([])
 plt.tight_layout()
 plt.show()
 
-RocCurveDisplay.from_estimator(estimator=tuned_rf_clf, X=X_test, y=y_test)
+RocCurveDisplay.from_estimator(estimator=tuned_xgb_clf, X=X_test, y=y_test)
 plt.title('Final ROC_AUC Curve', weight='bold')
 plt.plot([0,1], [0,1], linestyle='--', color='red', label='Random Guessing (AUC = 0.50)')
 plt.xlabel('FPR', weight='bold')
@@ -236,7 +246,7 @@ column_transformer = ColumnTransformer(transformers=[('num', make_pipeline(Simpl
                     ('cat', make_pipeline(SimpleImputer(strategy='most_frequent'), OneHotEncoder(sparse_output=False)), cat_columns)], remainder='drop')
 column_transformer.set_output(transform='pandas')
 
-complete_model = make_pipeline(column_transformer, tuned_rf_clf)
+complete_model = make_pipeline(column_transformer, tuned_xgb_clf)
 complete_model.fit(Xf_train, y_train)
 
 # 2.)
@@ -262,6 +272,6 @@ transformed_data = preprocessor.transform(Xf_train)
 topf_df = pd.DataFrame({'features':transformed_data.columns, 'feature_score':complete_model[-1].feature_importances_.round(6)})
 topf_df.sort_values(by='feature_score', ascending=False, inplace=True)
 topf_df.drop(index=topf_df.index[10:], inplace=True)
-topf_df.index.name = 'rank'
 topf_df.index = range(1, 11)
+topf_df.index.name = 'rank'
 print(topf_df)
